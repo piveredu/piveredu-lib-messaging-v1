@@ -10,9 +10,15 @@ import (
 	"time"
 )
 
-func main() {
-	client := messaging.New(context.TODO())
+var (
+	client = messaging.New(context.TODO())
+)
+
+func init() {
 	client.EstablishConnection()
+}
+
+func main() {
 	event := messaging.NewEvent("piveredu.tenant", "piveredu.tenant.create", "piveredu.tenant.create")
 	event.Metadata = map[string]any{
 		"triggered_by": "bb4ef24b-1699-4452-ad09-f284e57c6049",
