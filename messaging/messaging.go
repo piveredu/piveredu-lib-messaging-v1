@@ -28,7 +28,7 @@ type MessageEvent struct {
 	Application  string            `json:"application,omitempty"`
 	Event        string            `json:"event,omitempty"`
 	Metadata     map[string]any    `json:"metadata,omitempty"`
-	Medium 		 []string 		   `json:"medium"`
+	Channels 		 []string 		     `json:"channels"`
 	Payload      []byte            `json:"payload,omitempty"`
 	Timestamp    int64             `json:"timestamp,omitempty"`
 	Acknowledger amqp.Acknowledger `json:"-"`
@@ -85,7 +85,7 @@ func NewEvent(application, event, action string) *MessageEvent {
 		Metadata:    nil,
 		Payload:     nil,
 		Timestamp:   time.Now().UnixMilli(),
-		Medium: 	 []string{"email"},
+		Channels: 	 []string{"email"},
 	}
 }
 

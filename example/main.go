@@ -24,7 +24,7 @@ func main() {
 		"triggered_by": "bb4ef24b-1699-4452-ad09-f284e57c6049",
 	}
 
-	event.Medium = []string{"email", "sms", "push"}
+	event.Channels = []string{"email", "sms", "push"}
 
 	payload := map[string]any{
 		"tenant": map[string]any{
