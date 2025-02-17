@@ -19,10 +19,12 @@ func init() {
 }
 
 func main() {
-	event := messaging.NewEvent("piveredu.tenant", "piveredu.tenant.create", "piveredu.tenant.create")
+	event := messaging.NewEvent("piveredu.user", "piveredu.user.created", "piveredu.user.create")
 	event.Metadata = map[string]any{
 		"triggered_by": "bb4ef24b-1699-4452-ad09-f284e57c6049",
 	}
+
+	event.Medium = []string{"email", "sms", "push"}
 
 	payload := map[string]any{
 		"tenant": map[string]any{
@@ -45,7 +47,7 @@ func main() {
 		log.Fatalln("failed to marshal event:", err)
 	}
 
-	if _, err := client.Publish("piveredu.tenant", jb, &messaging.PublishOptions{
+	if _, err := client.Publish("piveredu.user", jb, &messaging.PublishOptions{
 		Args:        nil,
 		AutoDelete:  false,
 		ContentType: "application/json",
@@ -59,10 +61,10 @@ func main() {
 		log.Fatalln("failed to send message: |", err)
 	}
 
-	messageEvents, err := client.Consume("piveredu.tenant", &messaging.ConsumeOptions{
+	messageEvents, err := client.Consume("piveredu.user", &messaging.ConsumeOptions{
 		AutoAck:      false,
 		ConsumerName: "",
-		QueueName:    "piveredu.tenant",
+		QueueName:    "piveredu.user",
 		Durable:      false,
 		Exclusive:    false,
 		NoLocal:      false,
