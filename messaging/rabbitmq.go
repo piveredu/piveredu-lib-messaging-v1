@@ -59,89 +59,60 @@ func (client *RabbitMqClient) reconnect() {
 func (client *RabbitMqClient) Consume(topicName string, opt *ConsumeOptions) (<-chan *MessageEvent, error) {
 	log.Printf("<[🔥]> Consuming messages from topicName: %s <[🔥]>\n", topicName)
 
-	// Declare queue
 	queue, err := client.channel.QueueDeclare(
-		topicName,      // name
-		opt.Durable,    // durable
-		opt.AutoDelete, // delete when unused
-		opt.Exclusive,  // exclusive
-		opt.NoWait,     // no-wait
-		opt.Args,       // arguments
+		topicName, opt.Durable, opt.AutoDelete, opt.Exclusive, opt.NoWait, opt.Args,
 	)
 	if err != nil {
 		log.Printf("‼️ Failed to declare queue for topic %s: %v\n", topicName, err)
 		return nil, err
 	}
 
-	// Optional: Bind queue to exchange if needed
-	if opt.Exchange != "" {
-		if err := client.channel.QueueBind(
-			queue.Name,   // queue name
-			topicName,    // routing key
-			opt.Exchange, // exchange name
-			opt.NoWait,
-			opt.Args,
-		); err != nil {
-			log.Printf("‼️ Failed to bind queue to exchange for topic %s: %v\n", topicName, err)
-			return nil, err
-		}
-	}
-
 	messageEvents := make(chan *MessageEvent)
 
-	// Signal handling for graceful shutdown
+	// Create a context with cancel to gracefully stop consumers
+	ctx, cancel := context.WithCancel(client.ctx)
+
+	// Capture termination signals globally
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	client.wg.Add(1) // Add to wait group for the consumer goroutine
-
+	client.wg.Add(1)
 	go func() {
-		defer client.wg.Done()     // Decrement wait group counter when the goroutine exits
-		defer close(messageEvents) // Close channel when done
+		defer client.wg.Done()
+		defer close(messageEvents)
+
+		messages, err := client.channel.Consume(
+			queue.Name, opt.ConsumerName, opt.AutoAck, opt.Exclusive, opt.NoLocal, opt.NoWait, opt.Args,
+		)
+		if err != nil {
+			log.Printf("‼️ Failed to consume messages: %v\n", err)
+			return
+		}
 
 		for {
 			select {
+			case <-ctx.Done():
+				log.Println("🔴 Stopping message consumer gracefully...")
+				return
 			case sig := <-sigChan:
 				log.Printf("‼️ Caught signal %v: initiating shutdown\n", sig)
-				client.Close() // Close the connection and channel
+				cancel() // Stop the consumer
+				client.Close()
 				return
-			default:
-				// Check if the connection or channel is closed, and attempt reconnection if necessary
-				client.mu.Lock()
-				if client.channel == nil || client.channel.IsClosed() || client.engine.IsClosed() {
-					log.Println("‼️ Connection or channel closed, attempting to reconnect...")
-					client.reconnect() // Attempt to reconnect
+			case msg, ok := <-messages:
+				if !ok {
+					log.Println("🔴 Message channel closed, exiting consumer...")
+					return
 				}
-				client.mu.Unlock()
-
-				// Consume messages
-				messages, err := client.channel.Consume(
-					queue.Name,
-					opt.ConsumerName,
-					opt.AutoAck,
-					opt.Exclusive,
-					opt.NoLocal,
-					opt.NoWait,
-					opt.Args,
-				)
-				if err != nil {
-					log.Printf("‼️ Failed to consume messages: %v\n", err)
-					time.Sleep(1 * time.Second) // Retry delay
+				evt := new(MessageEvent)
+				if err := json.Unmarshal(msg.Body, evt); err != nil {
+					log.Printf("‼️ Failed to unmarshal message: %v\n", err)
 					continue
 				}
-
-				for msg := range messages {
-					evt := new(MessageEvent)
-					if err := json.Unmarshal(msg.Body, evt); err != nil {
-						log.Printf("‼️ Failed to unmarshal message: %v\n", err)
-						continue
-					}
-
-					evt.Acknowledger = msg.Acknowledger
-					evt.Tag = msg.DeliveryTag
-					messageEvents <- evt
-					log.Printf("<[✈️]> Message sent to topicName %s <[✈️]>\n", msg.RoutingKey)
-				}
+				evt.Acknowledger = msg.Acknowledger
+				evt.Tag = msg.DeliveryTag
+				messageEvents <- evt
+				log.Printf("<[✈️]> Message sent to topicName %s <[✈️]>\n", msg.RoutingKey)
 			}
 		}
 	}()
@@ -251,17 +222,25 @@ func (client *RabbitMqClient) Close() {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 
+	log.Println("🔴 Closing RabbitMQ connection...")
+
+	// Ensure channel is closed
 	if client.channel != nil && !client.channel.IsClosed() {
 		if err := client.channel.Close(); err != nil {
 			log.Printf("Failed to close RabbitMQ channel: %v\n", err)
 		}
 	}
+
+	// Ensure connection is closed
 	if client.engine != nil && !client.engine.IsClosed() {
 		if err := client.engine.Close(); err != nil {
 			log.Printf("Failed to close RabbitMQ connection: %v\n", err)
 		}
 	}
-	client.wg.Wait() // Wait for all goroutines to finish
+
+	// Wait for all goroutines to finish before exiting
+	client.wg.Wait()
+	log.Println("✅ RabbitMQ connection closed successfully")
 }
 
 func NewRabbitMQClient(ctx context.Context, cfg *RabbitMQConfig) *RabbitMqClient {
